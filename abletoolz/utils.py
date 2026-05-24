@@ -319,7 +319,7 @@ class SampleRef(pydantic.BaseModel):
             for e in old:
                 self.relative_element.remove(e)
             for i, folder in enumerate(path.split("/")[:-1]):
-                element = ET.Element("RelativePathElement", attrib=dict(Id=i, Dir=folder))
+                element = ET.Element("RelativePathElement", attrib=dict(Id=str(i), Dir=folder))
                 element.tail = tails[i]
                 self.relative_element.append(element)
             return
