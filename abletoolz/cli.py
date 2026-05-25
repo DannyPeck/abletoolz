@@ -3,6 +3,7 @@
 import argparse
 import copy
 import datetime
+import io
 import logging
 import os
 import pathlib
@@ -193,6 +194,13 @@ def parse_arguments() -> argparse.Namespace:
         "you save your project, so take it with a grain of salt. AU are not stored as paths in "
         "sets but abbreviated component names. Might possibly add support for them later.",
     )
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        default=False,
+        help="When used with --fix-samples-collect or --fix-samples-absolute, suppress all output for "
+        "sets/clips that have no missing samples.",
+    )
 
     args = parser.parse_args()
     assert not (
@@ -261,8 +269,9 @@ def process_set(args: argparse.Namespace, pathlib_obj: pathlib.Path, db: Optiona
     if args.check_samples:
         ableton_set.list_samples()
 
+    missing_count = -1
     if args.fix_samples_absolute or args.fix_samples_collect:
-        ableton_set.fix_samples(db, collect_and_save=args.fix_samples_collect)
+        missing_count = ableton_set.fix_samples(db, collect_and_save=args.fix_samples_collect)
 
     if args.check_plugins:
         vst_dirs: List[pathlib.Path] = []
@@ -294,7 +303,7 @@ def process_set(args: argparse.Namespace, pathlib_obj: pathlib.Path, db: Optiona
         ]
     ):
         logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
-    return 0
+    return missing_count
 
 
 def process(args: argparse.Namespace) -> int:
@@ -320,15 +329,39 @@ def process(args: argparse.Namespace) -> int:
         logger.info("%sError, no sets to process!", R)
         return -1
 
+    sets_with_missing = 0
     for pathlib_obj in pathlib_objects:
-        try:
-            process_set(args, pathlib_obj, db)
-        except ElementNotFound:
-            logger.info(traceback.format_exc())
-        logger.info("%s\n\n%s\n\n", M, "^" * os.get_terminal_size().columns)
-    logger.info(
-        "%sTook %s to process %s set(s)", CB, datetime.timedelta(seconds=time.time() - start_time), len(pathlib_objects)
-    )
+        if args.only_missing and (args.fix_samples_collect or args.fix_samples_absolute):
+            log_buffer = io.StringIO()
+            buffer_handler = logging.StreamHandler(log_buffer)
+            buffer_handler.setFormatter(logging.Formatter("%(message)s"))
+            root_logger = logging.getLogger()
+            original_handlers = root_logger.handlers[:]
+            root_logger.handlers = [buffer_handler]
+            try:
+                missing = process_set(args, pathlib_obj, db)
+            except ElementNotFound:
+                missing = -1
+            root_logger.handlers = original_handlers
+            if missing != 0:
+                sets_with_missing += 1
+                sys.stdout.write(log_buffer.getvalue())
+                logger.info("%s\n\n%s\n\n", M, "^" * os.get_terminal_size().columns)
+        else:
+            try:
+                missing = process_set(args, pathlib_obj, db)
+            except ElementNotFound:
+                missing = -1
+                logger.info(traceback.format_exc())
+            if missing not in (0, -1):
+                sets_with_missing += 1
+            logger.info("%s\n\n%s\n\n", M, "^" * os.get_terminal_size().columns)
+    summary = "%sTook %s to process %s set(s)"
+    summary_args = [CB, datetime.timedelta(seconds=time.time() - start_time), len(pathlib_objects)]
+    if args.fix_samples_collect or args.fix_samples_absolute:
+        summary += ", %s with missing samples"
+        summary_args.append(sets_with_missing)
+    logger.info(summary, *summary_args)
     return 0
 
 

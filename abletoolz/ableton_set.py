@@ -641,7 +641,7 @@ class AbletonSet(object):
             yield parsed
         return
 
-    def fix_samples(self, db: Dict[str, Dict[str, str]], collect_and_save: bool = False, force: bool = False) -> bool:
+    def fix_samples(self, db: Dict[str, Dict[str, str]], collect_and_save: bool = False, force: bool = False) -> int:
         """Fix broken sample paths.
 
         Args:
@@ -695,6 +695,7 @@ class AbletonSet(object):
             fixed_samples,
             missing_samples - fixed_samples,
         )
+        return missing_samples
 
     def _fix_sample(
         self,
