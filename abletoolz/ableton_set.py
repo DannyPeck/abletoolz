@@ -257,8 +257,7 @@ class AbletonSet(object):
             win32_setctime.setctime(self.path, self.creation_time)
         elif sys.platform == "darwin":
             date = utils.format_date(self.creation_time)
-            path = str(pathlib_obj).replace(" ", r"\ ")
-            os.system(f'SetFile -d "{date}" {path} >/dev/null')
+            subprocess.run(["SetFile", "-d", date, str(pathlib_obj)], capture_output=True)
         logger.debug(
             "%sRestored set creation and modification times: %s, %s",
             G,
@@ -326,11 +325,13 @@ class AbletonSet(object):
         """Get bpm from Ableton Live set XML."""
         if self.version_tuple is None:
             raise SetError("Set version is not parsed!")
+        post_12_bpm = "LiveSet.MainTrack.DeviceChain.Mixer.Tempo.Manual"
         post_10_bpm = "LiveSet.MasterTrack.DeviceChain.Mixer.Tempo.Manual"
-        pre_10_bpm = "LiveSet.MasterTrack.MasterChain.Mixer.Tempo.ArrangerAutomation.Events.FloatEvent"
         pre_10_bpm = "LiveSet.MasterTrack.DeviceChain.Mixer.Tempo.ArrangerAutomation.Events.FloatEvent"
         major, minor, _ = self.version_tuple
-        if major >= 10 or major >= 9 and minor >= 7:
+        if major >= 12:
+            bpm_elem = get_element(self.root, post_12_bpm, attribute="Value", silent_error=True)
+        elif major >= 10 or major >= 9 and minor >= 7:
             bpm_elem = get_element(self.root, post_10_bpm, attribute="Value", silent_error=True)
         else:
             bpm_elem = get_element(self.root, pre_10_bpm, attribute="Value")
@@ -745,11 +746,21 @@ class AbletonSet(object):
             parsed.set_relative(f"{rel_path}/{copied_sample.name}")
             parsed.set_relative_type(3)
         elif collect_and_save and not self.project_root_folder:
-            logger.warning(
-                "%sProject root () not found, can't collect and save this sample. " "Using absolute path instead..", Y
-            )
-            parsed.set_absolute(replacement_sample)
-            parsed.set_relative_type(1)
+            fallback_root = self.path.parent
+            rel_path = "Samples/Imported"
+            (fallback_root / rel_path).mkdir(parents=True, exist_ok=True)
+            copied_sample = fallback_root / rel_path / smp_info.get("name")
+            if copied_sample.exists() and copied_sample.stat().st_size != parsed.size:
+                logger.error(
+                    "%sCannot copy sample %s, would replace existing one with same name! Skipping...",
+                    R,
+                    copied_sample,
+                )
+                return False
+            elif not copied_sample.exists():
+                shutil.copy(replacement_sample, copied_sample)
+            parsed.set_relative(f"{rel_path}/{copied_sample.name}")
+            parsed.set_relative_type(3)
         else:
             parsed.set_absolute(replacement_sample)
             parsed.set_relative_type(1)
