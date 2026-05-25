@@ -32,7 +32,7 @@ def get_pathlib_objects(srcs: List[str]) -> List[pathlib.Path]:
     for src in srcs:
         path = pathlib.Path(src)
         if path.is_dir():
-            files = list(path.rglob("*.als"))
+            files = list(path.rglob("*.als")) + list(path.rglob("*.alc"))
             # Hacky but Path.rglob doesn't have options for filtering.
             files_to_process = []
             for file in files:

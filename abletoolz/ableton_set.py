@@ -286,7 +286,7 @@ class AbletonSet(object):
         utils.create_backup(self.path)
         if append_bars_bpm:
             cleaned_name = re.sub(r"_\d{1,3}bars_\d{1,3}\.\d{2}bpm", "", self.path.stem)
-            new_filename = cleaned_name + f"_{self.furthest_bar}bars_{self.bpm:.2f}bpm.als"
+            new_filename = cleaned_name + f"_{self.furthest_bar}bars_{self.bpm:.2f}bpm{self.path.suffix}"
             self.path = pathlib.Path(self.path.parent / new_filename)
             logger.debug("%sAppending bars and bpm, new set name: %s.als", M, self.path.stem)
 
