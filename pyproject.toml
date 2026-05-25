@@ -37,5 +37,5 @@ Repository = "https://github.com/elixirbeats/abletoolz"
 [project.scripts]
 abletoolz = "abletoolz:main"
 
-[tool.setuptools]
-packages = ["abletoolz"]
+[tool.setuptools.packages.find]
+where = ["."]
