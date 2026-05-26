@@ -106,12 +106,33 @@ def _add_db_subcommand(subparsers: argparse._SubParsersAction) -> None:
     _add_verbose_arg(p)
 
 
-def _add_inspect_subcommand(subparsers: argparse._SubParsersAction) -> None:
-    p = subparsers.add_parser("inspect", help="Read-only analysis of Ableton sets.")
-    p.add_argument(
-        "mode",
-        choices=["tracks", "samples", "plugins", "xml"],
-        help="tracks: list all track info | samples: check sample paths | plugins: check VST paths | xml: dump set XML",
+def _add_list_tracks_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("list-tracks", help="List track information for Ableton sets.")
+    _add_sets_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_list_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("list-samples", help="Check relative and absolute sample paths and verify they exist.")
+    _add_sets_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_list_plugins_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "list-plugins",
+        help="Check plugin VST paths and verify they exist. VST directories discovered across sets are accumulated "
+        "to aid searching for missing plugins.",
+    )
+    _add_sets_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_unzip_xml_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "unzip-xml",
+        help="Dump the uncompressed set XML to set_name.xml in the same directory. Useful for understanding set "
+        "structure. Previous XML files are moved to the abletoolz_backup folder.",
     )
     _add_sets_arg(p)
     _add_verbose_arg(p)
@@ -219,7 +240,10 @@ def parse_arguments() -> argparse.Namespace:
     subparsers.required = True
 
     _add_db_subcommand(subparsers)
-    _add_inspect_subcommand(subparsers)
+    _add_list_tracks_subcommand(subparsers)
+    _add_list_samples_subcommand(subparsers)
+    _add_list_plugins_subcommand(subparsers)
+    _add_unzip_xml_subcommand(subparsers)
     _add_samples_subcommand(subparsers)
     _add_tracks_subcommand(subparsers)
     _add_routing_subcommand(subparsers)
@@ -267,7 +291,48 @@ def run_db(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_inspect(args: argparse.Namespace) -> int:
+def run_list_tracks(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+
+            ableton_set.load_tracks()
+            ableton_set.print_tracks()
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    return 0
+
+
+def run_list_samples(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+
+            ableton_set.list_samples()
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    return 0
+
+
+def run_list_plugins(args: argparse.Namespace) -> int:
     paths = _get_sets(args.sets)
     if not paths:
         return -1
@@ -279,27 +344,38 @@ def run_inspect(args: argparse.Namespace) -> int:
             if ableton_set is None:
                 _log_separator()
                 continue
-            match args.mode:
-                case "tracks":
-                    ableton_set.load_tracks()
-                    ableton_set.print_tracks()
-                case "samples":
-                    ableton_set.list_samples()
-                case "plugins":
-                    accumulated_vst_dirs |= ableton_set.list_plugins()
-                case "xml":
-                    ableton_set.save_xml()
+
+            accumulated_vst_dirs |= ableton_set.list_plugins()
         except ElementNotFound:
             logger.info(traceback.format_exc())
         _log_separator()
     _log_summary(start, len(paths))
-    if args.mode == "plugins":
-        if accumulated_vst_dirs:
-            logger.info("%sAll VST directories found:", CB)
-            for vst_dir in sorted(accumulated_vst_dirs):
-                logger.info("  %s%s", M, vst_dir)
-        else:
-            logger.info("%sNo VST directories found.", Y)
+    if accumulated_vst_dirs:
+        logger.info("%sAll VST directories found:", CB)
+        for vst_dir in sorted(accumulated_vst_dirs):
+            logger.info("  %s%s", M, vst_dir)
+    else:
+        logger.info("%sNo VST directories found.", Y)
+    return 0
+
+
+def run_unzip_xml(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+
+            ableton_set.save_xml()
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
     return 0
 
 
@@ -439,7 +515,10 @@ def run_rename(args: argparse.Namespace) -> int:
 
 _COMMAND_HANDLERS = {
     "db": run_db,
-    "inspect": run_inspect,
+    "list-tracks": run_list_tracks,
+    "list-samples": run_list_samples,
+    "list-plugins": run_list_plugins,
+    "unzip-xml": run_unzip_xml,
     "samples": run_samples,
     "tracks": run_tracks,
     "routing": run_routing,
