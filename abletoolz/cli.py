@@ -154,7 +154,7 @@ def _add_fix_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
         "Omit to fix references as absolute paths without copying.",
     )
     p.add_argument(
-        "--only-missing",
+        "--show-missing-only",
         action="store_true",
         default=False,
         help="Suppress all output for sets that have no missing samples.",
@@ -385,7 +385,7 @@ def run_fix_samples(args: argparse.Namespace) -> int:
     start = time.time()
     sets_with_missing = 0
     for path in paths:
-        if args.only_missing:
+        if args.show_missing_only:
             log_buffer = io.StringIO()
             buffer_handler = logging.StreamHandler(log_buffer)
             buffer_handler.setFormatter(logging.Formatter("%(message)s"))

@@ -143,25 +143,26 @@ abletoolz unzip-xml "D:\all_sets\some_set.als"
 
 ---
 
-### `samples` — Fix missing sample references
+### `fix-samples` — Fix missing sample references
 
 ```
-abletoolz samples <sets...> (--fix-collect | --fix-absolute) [--only-missing] [-s] [-v]
+abletoolz fix-samples <sets...> [--collect project|imported] [--show-missing-only] [-s] [-v]
 ```
 
 Requires a sample database built with `abletoolz index-samples` first. Use `-s`/`--save` to write changes to disk.
 
-**`--fix-collect`** — For each missing sample, find a match in the database (by name, file size, and modification date) and copy it into the set's project folder. Same as Collect and Save in Ableton.
+Without `--collect`, finds each missing sample in the database and rewrites its reference to an absolute path. No files are copied.
 
-**`--fix-absolute`** — Same as `--fix-collect` but fixes the path in place without copying the sample.
-Note: on macOS 10/9 sets this can sometimes behave unexpectedly — prefer `--fix-collect` for those.
+**`--collect=project`** — For each missing sample that was previously collected (i.e. already has a project-relative path), find it in the database and copy it back to its original location in the project folder. Samples with no existing collected path are skipped — use `--collect=imported` for those.
+
+**`--collect=imported`** — Find each missing sample in the database and copy it into `Samples/Imported` inside the project folder (or next to the set file if no project folder exists). Always copies to this location regardless of any existing path.
 
 ```
-abletoolz samples "D:\all_sets" --fix-collect -s
+abletoolz fix-samples "D:\all_sets" --collect=imported -s
 ```
 ![Fixing sample references](https://github.com/elixirbeats/abletoolz/raw/master/doc/sample_fix.png)
 
-**`--only-missing`** — Suppress all output for sets that have no missing samples, reducing noise when processing large collections.
+**`--show-missing-only`** — Suppress all output for sets that have no missing samples, reducing noise when processing large collections.
 
 ---
 
