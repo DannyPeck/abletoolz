@@ -65,17 +65,17 @@ NOTE: On Windows, do NOT include a trailing backslash inside quotes:
 
 ---
 
-### `db` — Build sample database
+### `index-samples` — Build sample database
 
 ```
-abletoolz db <dirs...>
+abletoolz index-samples <dirs...>
 ```
 
 Scans directories for audio samples and builds a local database used for automatic sample fixing.
 Run this on all folders that could contain samples. The database is stored in your home directory.
 
 ```
-abletoolz db ~/Music/Samples ~/Music/Sets
+abletoolz index-samples ~/Music/Samples ~/Music/Sets
 ```
 ![Database](https://github.com/elixirbeats/abletoolz/raw/master/doc/db_example.png)
 
@@ -149,7 +149,7 @@ abletoolz unzip-xml "D:\all_sets\some_set.als"
 abletoolz samples <sets...> (--fix-collect | --fix-absolute) [--only-missing] [-s] [-v]
 ```
 
-Requires a sample database built with `abletoolz db` first. Use `-s`/`--save` to write changes to disk.
+Requires a sample database built with `abletoolz index-samples` first. Use `-s`/`--save` to write changes to disk.
 
 **`--fix-collect`** — For each missing sample, find a match in the database (by name, file size, and modification date) and copy it into the set's project folder. Same as Collect and Save in Ableton.
 

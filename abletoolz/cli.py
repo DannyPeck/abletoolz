@@ -93,9 +93,9 @@ def _add_verbose_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_db_subcommand(subparsers: argparse._SubParsersAction) -> None:
+def _add_index_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
-        "db",
+        "index-samples",
         help="Create/update sample database for fast lookups when fixing broken sample paths.",
     )
     p.add_argument(
@@ -239,7 +239,7 @@ def parse_arguments() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", metavar="command")
     subparsers.required = True
 
-    _add_db_subcommand(subparsers)
+    _add_index_samples_subcommand(subparsers)
     _add_list_tracks_subcommand(subparsers)
     _add_list_samples_subcommand(subparsers)
     _add_list_plugins_subcommand(subparsers)
@@ -286,7 +286,7 @@ def _log_summary(start_time: float, count: int) -> None:
     logger.info("%sTook %s to process %s set(s)", CB, datetime.timedelta(seconds=time.time() - start_time), count)
 
 
-def run_db(args: argparse.Namespace) -> int:
+def run_index_samples(args: argparse.Namespace) -> int:
     create_db.create_or_update_db(args.samples)
     return 0
 
@@ -514,7 +514,7 @@ def run_rename(args: argparse.Namespace) -> int:
 
 
 _COMMAND_HANDLERS = {
-    "db": run_db,
+    "index-samples": run_index_samples,
     "list-tracks": run_list_tracks,
     "list-samples": run_list_samples,
     "list-plugins": run_list_plugins,
