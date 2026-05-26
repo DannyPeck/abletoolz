@@ -1,7 +1,6 @@
 """Cli entry point."""
 
 import argparse
-import copy
 import datetime
 import io
 import logging
@@ -10,7 +9,7 @@ import pathlib
 import sys
 import time
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from abletoolz import __version__
 from abletoolz.ableton_set import AbletonSet
@@ -20,17 +19,17 @@ from abletoolz.sample_databaser import create_db
 logger = logging.getLogger(__name__)
 
 
-def get_pathlib_objects(srcs: List[str]) -> List[pathlib.Path]:
+def get_pathlib_objects(sets: List[str]) -> List[pathlib.Path]:
     """Get all ableton sets to parse.
 
     Args:
-        srcs: path or paths to directories and set files.
+        sets: path or paths to directories and set files.
 
     Returns:
         list of pathlib.Paths with all ableton sets to parse, excluding backup directories.
     """
     paths: List[pathlib.Path] = []
-    for src in srcs:
+    for src in sets:
         path = pathlib.Path(src)
         if path.is_dir():
             files = list(path.rglob("*.als")) + list(path.rglob("*.alc"))
@@ -61,35 +60,17 @@ def is_valid_dir_path(path: str) -> str:
     return path
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Get command line arguments."""
-    parser = argparse.ArgumentParser(description=f"abletoolz {__version__}", add_help=True)
-
-    # Input arguments.
+def _add_sets_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "srcs",
-        action="store",
-        nargs="*",
+        "sets",
+        nargs="+",
         help="Set(s) or directory(ies). All sub folders in directories are parsed for sets. NOTE: On WINDOWS remove "
         "the trailing backslash when processing folders! This is due to how windows and python interact with "
         "backslashes, which are normally escape characters.",
     )
-    parser.add_argument(
-        "--db",
-        "--database",
-        action="store_true",
-        default=False,
-        help="Instead of parsing sets, create/update sample database for fast lookups when fixing broken paths.",
-    )
 
-    # Output arguments.
-    parser.add_argument(
-        "-x",
-        "--xml",
-        action="store_true",
-        default=False,
-        help="dump the xml in same directory as set_name.xml(Useful to understand set structure).",
-    )
+
+def _add_save_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-s",
         "--save",
@@ -100,238 +81,238 @@ def parse_arguments() -> argparse.Namespace:
         f"set_directory/{BACKUP_DIR}/set_name_xx.als, where xx will automatically increase to "
         "to avoid overwriting files.",
     )
+
+
+def _add_verbose_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         default=False,
-        help="Adds extra verbosity, for some commands this will print more information.",
+        help="Adds extra verbosity.",
     )
 
-    parser.add_argument(
-        "--append-bars-bpm",
-        action="store_true",
-        default=False,
-        help="Append furthest bar length and bpm to filename to help organize your set collection. "
-        "For example, my_set.als --> my_set_32bars_90.00bpm.als Option only works with -s/--save",
-    )
-    parser.add_argument(
-        "--prepend-version",
-        action="store_true",
-        default=False,
-        help="Appends set version to set filename",
-    )
 
-    # Edit set arguments.
-    parser.add_argument(
-        "--unfold",
+def _add_db_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "db",
+        help="Create/update sample database for fast lookups when fixing broken sample paths.",
+    )
+    p.add_argument(
+        "samples",
+        nargs="+",
+        help="Directories to scan for samples.",
+    )
+    _add_verbose_arg(p)
+
+
+def _add_inspect_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("inspect", help="Read-only analysis of Ableton sets.")
+    p.add_argument(
+        "mode",
+        choices=["tracks", "samples", "plugins", "xml"],
+        help="tracks: list all track info | samples: check sample paths | plugins: check VST paths | xml: dump set XML",
+    )
+    _add_sets_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("samples", help="Fix missing sample references.")
+    _add_sets_arg(p)
+    fix_group = p.add_mutually_exclusive_group(required=True)
+    fix_group.add_argument(
+        "--fix-absolute",
         action="store_true",
         default=False,
-        help="unfolds all tracks/automation lanes in arrangement.",
+        help="Find missing samples and fix broken references. Does not copy samples into project folder. "
+        "Run 'abletoolz db' on folders first to create your database.",
     )
-    parser.add_argument(
+    fix_group.add_argument(
+        "--fix-collect",
+        action="store_true",
+        default=False,
+        help="Collect and save missing samples into the set's project folder, the same as collect and save in "
+        "Ableton. Run 'abletoolz db' on folders first to create your database.",
+    )
+    p.add_argument(
+        "--only-missing",
+        action="store_true",
+        default=False,
+        help="Suppress all output for sets that have no missing samples.",
+    )
+    _add_save_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_tracks_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("tracks", help="Modify track layout and appearance.")
+    _add_sets_arg(p)
+    fold_group = p.add_mutually_exclusive_group()
+    fold_group.add_argument(
         "--fold",
         action="store_true",
         default=False,
-        help="folds all tracks/automation lanes in arrangement.",
+        help="Fold all tracks/automation lanes in arrangement.",
     )
-    parser.add_argument("--set-track-heights", type=int, help="Set arrangement track heights")
-    parser.add_argument("--set-track-widths", type=int, help="Set clip view track width.")
-    parser.add_argument(
-        "--cue-out",
-        type=int,
-        help="set Cue audio output tracks. Set to 1 for stereo 1/2, 2 for 3/4 etc",
-    )
-    parser.add_argument(
-        "--master-out",
-        type=int,
-        help="number to set Master audio output tracks to. Same numbers as --cue-out",
-    )
-    parser.add_argument(
-        "--fix-samples-absolute",
+    fold_group.add_argument(
+        "--unfold",
         action="store_true",
         default=False,
-        help="Finds missing samples and fixes the broken references in your ableton sets. Does not copy sample into "
-        "project folder. Run --db on folders first "
-        "to create your database.",
+        help="Unfold all tracks/automation lanes in arrangement.",
     )
-    parser.add_argument(
-        "--fix-samples-collect",
-        action="store_true",
-        default=False,
-        help="Collects and saves missing samples into the set's project folder, the same as collect and save in "
-        "Ableton. Run --db on folders first to create your database.",
-    )
-    parser.add_argument(
-        "--gradient-tracks",
+    p.add_argument("--heights", type=int, help="Set arrangement track heights.")
+    p.add_argument("--widths", type=int, help="Set clip view track widths.")
+    p.add_argument(
+        "--gradient",
         action="store_true",
         default=False,
         help="Generate a random gradient over the tracks and color them. Ableton has a very limited set of available "
         "colors, so the results are limited, but you still can get some decent results. This uses the CIE2000 "
         "algorithm which helps create a gradient more natural to the human eye.",
     )
+    _add_save_arg(p)
+    _add_verbose_arg(p)
 
-    # Analysis arguments.
-    parser.add_argument(
-        "--list-tracks",
+
+def _add_routing_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("routing", help="Set audio output routing.")
+    _add_sets_arg(p)
+    p.add_argument(
+        "--master-out",
+        type=int,
+        help="Number to set Master audio output tracks to. Set to 1 for stereo 1/2, 2 for 3/4, etc.",
+    )
+    p.add_argument(
+        "--cue-out",
+        type=int,
+        help="Set Cue audio output tracks. Same numbering as --master-out.",
+    )
+    _add_save_arg(p)
+    _add_verbose_arg(p)
+
+
+def _add_rename_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("rename", help="Rename set files on save.")
+    _add_sets_arg(p)
+    p.add_argument(
+        "--bars-bpm",
         action="store_true",
         default=False,
-        help="Load and list all track information.",
+        help="Append furthest bar length and BPM to filename. "
+        "For example, my_set.als --> my_set_32bars_90.00bpm.als. Requires -s/--save.",
     )
-    parser.add_argument(
-        "--check-samples",
+    p.add_argument(
+        "--version",
         action="store_true",
         default=False,
-        help="Checks relative and absolute sample paths and verifies if sample exists there.",
+        help="Prepend Ableton version to set filename. Requires -s/--save.",
     )
-
-    parser.add_argument(
-        "--check-plugins",
-        action="store_true",
-        default=False,
-        help="Checks plugin VST paths and verifies they exists. Note: If Ableton finds the "
-        "plugin name in a different path it will automatically update these paths the next time "
-        "you save your project, so take it with a grain of salt. AU are not stored as paths in "
-        "sets but abbreviated component names. Might possibly add support for them later.",
-    )
-    parser.add_argument(
-        "--only-missing",
-        action="store_true",
-        default=False,
-        help="When used with --fix-samples-collect or --fix-samples-absolute, suppress all output for "
-        "sets/clips that have no missing samples.",
-    )
-
-    args = parser.parse_args()
-    assert not (
-        args.fix_samples_absolute and args.fix_samples_collect
-    ), "Can only use --fix-samples-collect or --fix-samples-absolute, not both!"
-    assert not (args.fold and args.unfold), "Only set unfold or fold, not both."
-    assert not (
-        args.db
-        and any(
-            [
-                args.append_bars_bpm,
-                args.check_plugins,
-                args.check_samples,
-                args.cue_out,
-                args.fix_samples_absolute,
-                args.fix_samples_collect,
-                args.fold,
-                args.gradient_tracks,
-                args.list_tracks,
-                args.master_out,
-                args.prepend_version,
-                args.save,
-                args.set_track_heights,
-                args.set_track_widths,
-                args.unfold,
-                args.xml,
-            ]
-        )
-    ), "--db/--database cannot be used with other commands!"
-    return args
+    _add_save_arg(p)
+    _add_verbose_arg(p)
 
 
-def process_set(args: argparse.Namespace, pathlib_obj: pathlib.Path, db: Optional[Dict]) -> int:
-    """Process individual set."""
+def parse_arguments() -> argparse.Namespace:
+    """Get command line arguments."""
+    parser = argparse.ArgumentParser(description=f"abletoolz {__version__}", add_help=True)
+    subparsers = parser.add_subparsers(dest="command", metavar="command")
+    subparsers.required = True
+
+    _add_db_subcommand(subparsers)
+    _add_inspect_subcommand(subparsers)
+    _add_samples_subcommand(subparsers)
+    _add_tracks_subcommand(subparsers)
+    _add_routing_subcommand(subparsers)
+    _add_rename_subcommand(subparsers)
+
+    return parser.parse_args()
+
+
+def _load_set(pathlib_obj: pathlib.Path) -> Optional[AbletonSet]:
+    """Parse and initialize an Ableton set, returning None on parse failure."""
     logger.info("%sParsing: %s", C, pathlib_obj)
     ableton_set = AbletonSet(pathlib_obj)
     if not ableton_set.parse():
-        return -2
+        return None
     ableton_set.load_version()
     logger.info("%sSet name: %s, %sBPM: %s", C, pathlib_obj.stem, B, ableton_set.get_bpm())
     ableton_set.find_project_root_folder()
     ableton_set.find_furthest_bar()
     ableton_set.estimate_length()
-    # if args.save:
-    #     backup = copy.deepcopy(ableton_set)
-
-    if args.master_out:
-        ableton_set.set_audio_output(args.master_out, element_string="MasterTrack")
-    if args.cue_out:
-        ableton_set.set_audio_output(args.cue_out, element_string="PreHearTrack")
-    if args.fold:
-        ableton_set.fold_tracks()
-    elif args.unfold:
-        ableton_set.unfold_tracks()
-    if args.set_track_heights:
-        ableton_set.set_track_heights(args.set_track_heights)
-    if args.set_track_widths:
-        ableton_set.set_track_widths(args.set_track_widths)
-    if args.gradient_tracks:
-        ableton_set.gradient_tracks()
-
-    if args.list_tracks:
-        ableton_set.load_tracks()
-        ableton_set.print_tracks()
-
-    if args.check_samples:
-        ableton_set.list_samples()
-
-    missing_count = -1
-    if args.fix_samples_absolute or args.fix_samples_collect:
-        missing_count = ableton_set.fix_samples(db, collect_and_save=args.fix_samples_collect)
-
-    if args.check_plugins:
-        vst_dirs: List[pathlib.Path] = []
-        result = ableton_set.list_plugins(vst_dirs)
-        vst_dirs = list(set(result))
-
-    if args.xml:
-        ableton_set.save_xml()
-    if args.save:
-        # if backup == ableton_set:
-        #     logger.info("%sSet has no changes from originally, not saving...", MB)
-        #     return 0
-        ableton_set.save_set(append_bars_bpm=args.append_bars_bpm, prepend_version=args.prepend_version)
-    elif any(
-        [
-            args.append_bars_bpm,
-            args.check_plugins,
-            args.check_samples,
-            args.cue_out,
-            args.fix_samples_absolute,
-            args.fix_samples_collect,
-            args.fold,
-            args.gradient_tracks,
-            args.master_out,
-            args.prepend_version,
-            args.set_track_heights,
-            args.set_track_widths,
-            args.unfold,
-        ]
-    ):
-        logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
-    return missing_count
+    return ableton_set
 
 
-def process(args: argparse.Namespace) -> int:
-    """Process arguments.
-
-    Args:
-        args: argparse.Namespace with parsed arguments.
-
-    Returns:
-        integer with exit code, zero indicating success, non-zero indicating error.
-    """
-    if args.db:
-        create_db.create_or_update_db(args.srcs)
-        return 0
-    db = None
-    if args.fix_samples_collect or args.fix_samples_absolute:
-        logger.info("%sLoading db...", M)
-        db = create_db.load_db()
-
-    start_time = time.time()
-    pathlib_objects = get_pathlib_objects(srcs=args.srcs)
-    if not pathlib_objects:
+def _get_sets(sets: List[str]) -> List[pathlib.Path]:
+    """Resolve set paths, logging an error and returning an empty list if none found."""
+    paths = get_pathlib_objects(sets)
+    if not paths:
         logger.info("%sError, no sets to process!", R)
-        return -1
+    return paths
 
+
+def _log_separator() -> None:
+    try:
+        width = os.get_terminal_size().columns
+    except OSError:
+        width = 80
+    logger.info("%s\n\n%s\n\n", M, "^" * width)
+
+
+def _log_summary(start_time: float, count: int) -> None:
+    logger.info("%sTook %s to process %s set(s)", CB, datetime.timedelta(seconds=time.time() - start_time), count)
+
+
+def run_db(args: argparse.Namespace) -> int:
+    create_db.create_or_update_db(args.samples)
+    return 0
+
+
+def run_inspect(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    accumulated_vst_dirs: Set[pathlib.Path] = set()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+            match args.mode:
+                case "tracks":
+                    ableton_set.load_tracks()
+                    ableton_set.print_tracks()
+                case "samples":
+                    ableton_set.list_samples()
+                case "plugins":
+                    accumulated_vst_dirs |= ableton_set.list_plugins()
+                case "xml":
+                    ableton_set.save_xml()
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    if args.mode == "plugins":
+        if accumulated_vst_dirs:
+            logger.info("%sAll VST directories found:", CB)
+            for vst_dir in sorted(accumulated_vst_dirs):
+                logger.info("  %s%s", M, vst_dir)
+        else:
+            logger.info("%sNo VST directories found.", Y)
+    return 0
+
+
+def run_samples(args: argparse.Namespace) -> int:
+    logger.info("%sLoading db...", M)
+    db = create_db.load_db()
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
     sets_with_missing = 0
-    for pathlib_obj in pathlib_objects:
-        if args.only_missing and (args.fix_samples_collect or args.fix_samples_absolute):
+    for path in paths:
+        if args.only_missing:
             log_buffer = io.StringIO()
             buffer_handler = logging.StreamHandler(log_buffer)
             buffer_handler.setFormatter(logging.Formatter("%(message)s"))
@@ -339,30 +320,135 @@ def process(args: argparse.Namespace) -> int:
             original_handlers = root_logger.handlers[:]
             root_logger.handlers = [buffer_handler]
             try:
-                missing = process_set(args, pathlib_obj, db)
+                ableton_set = _load_set(path)
+                missing = ableton_set.fix_samples(db, collect_and_save=args.fix_collect) if ableton_set else -1
             except ElementNotFound:
                 missing = -1
             root_logger.handlers = original_handlers
             if missing != 0:
                 sets_with_missing += 1
                 sys.stdout.write(log_buffer.getvalue())
-                logger.info("%s\n\n%s\n\n", M, "^" * os.get_terminal_size().columns)
+                if args.save and missing > 0:
+                    ableton_set.save_set()
+                _log_separator()
         else:
             try:
-                missing = process_set(args, pathlib_obj, db)
+                ableton_set = _load_set(path)
+                if ableton_set is None:
+                    _log_separator()
+                    continue
+                missing = ableton_set.fix_samples(db, collect_and_save=args.fix_collect)
+                if missing > 0:
+                    sets_with_missing += 1
+                if args.save:
+                    ableton_set.save_set()
+                else:
+                    logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
             except ElementNotFound:
-                missing = -1
                 logger.info(traceback.format_exc())
-            if missing not in (0, -1):
-                sets_with_missing += 1
-            logger.info("%s\n\n%s\n\n", M, "^" * os.get_terminal_size().columns)
-    summary = "%sTook %s to process %s set(s)"
-    summary_args = [CB, datetime.timedelta(seconds=time.time() - start_time), len(pathlib_objects)]
-    if args.fix_samples_collect or args.fix_samples_absolute:
-        summary += ", %s with missing samples"
-        summary_args.append(sets_with_missing)
-    logger.info(summary, *summary_args)
+            _log_separator()
+    logger.info(
+        "%sTook %s to process %s set(s), %s with missing samples",
+        CB,
+        datetime.timedelta(seconds=time.time() - start),
+        len(paths),
+        sets_with_missing,
+    )
     return 0
+
+
+def run_tracks(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+            if args.fold:
+                ableton_set.fold_tracks()
+            elif args.unfold:
+                ableton_set.unfold_tracks()
+            if args.heights:
+                ableton_set.set_track_heights(args.heights)
+            if args.widths:
+                ableton_set.set_track_widths(args.widths)
+            if args.gradient:
+                ableton_set.gradient_tracks()
+            if args.save:
+                ableton_set.save_set()
+            else:
+                logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    return 0
+
+
+def run_routing(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+            if args.master_out:
+                ableton_set.set_audio_output(args.master_out, element_string="MasterTrack")
+            if args.cue_out:
+                ableton_set.set_audio_output(args.cue_out, element_string="PreHearTrack")
+            if args.save:
+                ableton_set.save_set()
+            else:
+                logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    return 0
+
+
+def run_rename(args: argparse.Namespace) -> int:
+    paths = _get_sets(args.sets)
+    if not paths:
+        return -1
+    start = time.time()
+    for path in paths:
+        try:
+            ableton_set = _load_set(path)
+            if ableton_set is None:
+                _log_separator()
+                continue
+            if args.save:
+                ableton_set.save_set(append_bars_bpm=args.bars_bpm, prepend_version=args.version)
+            else:
+                logger.info("%sNo changes saved, use -s/--save option to write changes to file.", Y)
+        except ElementNotFound:
+            logger.info(traceback.format_exc())
+        _log_separator()
+    _log_summary(start, len(paths))
+    return 0
+
+
+_COMMAND_HANDLERS = {
+    "db": run_db,
+    "inspect": run_inspect,
+    "samples": run_samples,
+    "tracks": run_tracks,
+    "routing": run_routing,
+    "rename": run_rename,
+}
+
+
+def process(args: argparse.Namespace) -> int:
+    return _COMMAND_HANDLERS[args.command](args)
 
 
 def main() -> None:

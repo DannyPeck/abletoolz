@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from typing import Callable, Dict, Generator, List, Optional, ParamSpec, Tuple, TypeVar
+from typing import Callable, Dict, Generator, List, Optional, ParamSpec, Set, Tuple, TypeVar
 from xml.etree import ElementTree as ET
 
 from abletoolz import color_tools, utils
@@ -128,7 +128,7 @@ class AbletonSet(object):
         self.set_os: SetOperatingSystem = SetOperatingSystem.UNSET
         self.missing_absolute_samples: List[pathlib.Path] = []
         self.missing_relative_samples: List[pathlib.Path] = []
-        self.found_vst_dirs: List[pathlib.Path] = []
+        self.found_vst_dirs: Set[pathlib.Path] = set()
         self.last_elem = None
         self.key = None
 
@@ -229,8 +229,7 @@ class AbletonSet(object):
         xml_file = self.path.parent / (self.path.stem + ".xml")
         if xml_file.exists():
             utils.create_backup(xml_file)
-        with xml_file as fd:
-            fd.write_bytes(self.generate_xml())
+        xml_file.write_bytes(self.generate_xml())
         logger.info("%sSaved xml to %s", G, xml_file)
 
     def get_file_times(self) -> None:
@@ -502,16 +501,19 @@ class AbletonSet(object):
         logger.error("%sCouldn't parse plugin!", R)
         return None, None, None
 
-    def list_plugins(self, vst_dirs: List[pathlib.Path]) -> List[pathlib.Path]:
-        """Iterates through all plugin references and checks paths for VSTs."""
-        self.found_vst_dirs.extend(vst_dirs)
+    def list_plugins(self) -> Set[pathlib.Path]:
+        """Iterates through all plugin references and checks paths for VSTs.
+
+        Returns:
+            Set of VST directories discovered in this set.
+        """
         for plugin_element in self.root.iter("PluginDesc"):
             self.last_elem = plugin_element
             for vst_element in plugin_element.iter("VstPluginInfo"):
                 full_path, name, potential = self.parse_vst_element(vst_element)
                 exists = True if full_path and full_path.exists() else False
-                if exists and full_path.parent not in self.found_vst_dirs:
-                    self.found_vst_dirs.append(full_path.parent)
+                if exists:
+                    self.found_vst_dirs.add(full_path.parent)
                 elif not exists:
                     # Did not find plugin in saved path, try to search
                     potential = self.search_plugins(name)
