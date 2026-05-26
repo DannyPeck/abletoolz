@@ -643,14 +643,14 @@ class AbletonSet(object):
             yield parsed
         return
 
-    def fix_samples(self, db: Dict[str, Dict[str, str]], collect_and_save: bool = False, force: bool = False) -> int:
+    def fix_samples(self, db: Dict[str, Dict[str, str]], collect: Optional[str] = None, force: bool = False) -> int:
         """Fix broken sample paths.
 
         Args:
             db: database loaded from json.
-            collect_and_save: copy any found samples into the project folder, the same as ableton's collect
-                and save
-            force: used with collect_and_save. When the same name sample is found in the project, force replace
+            collect: None to rewrite absolute paths only; "project" to copy into the Ableton project folder;
+                "imported" to copy into Samples/Imported explicitly.
+            force: used with collect. When the same name sample is found in the project, force replace
                 it if the project's current file is a different file size.
         """
         self.find_project_root_folder()
@@ -673,7 +673,7 @@ class AbletonSet(object):
 
             # There's often the same sample referenced many times in the same set, check previous found first.
             for smp_path, smp_info in found_samples.items():
-                if self._fix_sample(collect_and_save, parsed, smp_info, smp_path, found_samples, force):
+                if self._fix_sample(collect, parsed, smp_info, smp_path, found_samples, force):
                     fixed_samples += 1
                     skip_search = True
                     break
@@ -682,7 +682,7 @@ class AbletonSet(object):
                 continue
             # Iterating through hashes is extremely fast :D
             for smp_path, smp_info in db.items():
-                if self._fix_sample(collect_and_save, parsed, smp_info, smp_path, found_samples, force):
+                if self._fix_sample(collect, parsed, smp_info, smp_path, found_samples, force):
                     fixed_samples += 1
                     break
             else:
@@ -701,7 +701,7 @@ class AbletonSet(object):
 
     def _fix_sample(
         self,
-        collect_and_save: bool,
+        collect: Optional[str],
         parsed: utils.SampleRef,
         smp_info: Dict[str, str],
         smp_path: str,
@@ -725,34 +725,40 @@ class AbletonSet(object):
         found_samples[smp_path] = smp_info
         replacement_sample = pathlib.Path(smp_path)
 
-        if collect_and_save and self.project_root_folder:
-            # Relative type 3 is collected and saved, 1 is absolute path.
-            relative_type = parsed.get_relative_type()
-            if relative_type == 3:
-                rel_path = str(parsed.get_relative_value())
-            else:
-                rel_path = "Samples/Imported"
-            (self.project_root_folder / rel_path).mkdir(parents=True, exist_ok=True)
-
-            copied_sample = self.project_root_folder / rel_path / smp_info.get("name")
+        if collect == "project":
+            if not self.project_root_folder:
+                logger.warning(
+                    "%sNo project folder found for %s, cannot collect. Use --collect=imported instead.", Y, self.path
+                )
+                return False
+            # Relative type 3 is collected and saved; only re-collect already-collected samples.
+            if parsed.get_relative_type() != 3:
+                logger.warning(
+                    "%sSample %s has no existing collected path, skipping. Use --collect=imported to force.", Y, parsed.name
+                )
+                return False
+            rel_path = str(parsed.get_relative_value())
+            root = self.project_root_folder
+            dest_dir = root / rel_path
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            copied_sample = dest_dir / smp_info.get("name")
             if copied_sample.exists() and copied_sample.stat().st_size != parsed.size:
                 logger.error(
-                    "%sCannot copy sample %s, would replace existing one in project with " "same name! Skipping...",
+                    "%sCannot copy sample %s, would replace existing one in project with same name! Skipping...",
                     R,
                     copied_sample,
                 )
                 return False
-            elif copied_sample.exists() and copied_sample.stat().st_size == parsed.size:
-                pass
-            else:
+            elif not copied_sample.exists():
                 shutil.copy(replacement_sample, copied_sample)
             parsed.set_relative(f"{rel_path}/{copied_sample.name}")
             parsed.set_relative_type(3)
-        elif collect_and_save and not self.project_root_folder:
-            fallback_root = self.path.parent
+        elif collect == "imported":
+            root = self.project_root_folder if self.project_root_folder else self.path.parent
             rel_path = "Samples/Imported"
-            (fallback_root / rel_path).mkdir(parents=True, exist_ok=True)
-            copied_sample = fallback_root / rel_path / smp_info.get("name")
+            dest_dir = root / rel_path
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            copied_sample = dest_dir / smp_info.get("name")
             if copied_sample.exists() and copied_sample.stat().st_size != parsed.size:
                 logger.error(
                     "%sCannot copy sample %s, would replace existing one with same name! Skipping...",

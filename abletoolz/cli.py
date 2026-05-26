@@ -138,23 +138,20 @@ def _add_unzip_xml_subcommand(subparsers: argparse._SubParsersAction) -> None:
     _add_verbose_arg(p)
 
 
-def _add_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
-    p = subparsers.add_parser("samples", help="Fix missing sample references.")
-    _add_sets_arg(p)
-    fix_group = p.add_mutually_exclusive_group(required=True)
-    fix_group.add_argument(
-        "--fix-absolute",
-        action="store_true",
-        default=False,
-        help="Find missing samples and fix broken references. Does not copy samples into project folder. "
-        "Run 'abletoolz db' on folders first to create your database.",
+def _add_fix_samples_subcommand(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "fix-samples",
+        help="Fix missing sample references. Run 'abletoolz index-samples' on folders first to build the database.",
     )
-    fix_group.add_argument(
-        "--fix-collect",
-        action="store_true",
-        default=False,
-        help="Collect and save missing samples into the set's project folder, the same as collect and save in "
-        "Ableton. Run 'abletoolz db' on folders first to create your database.",
+    _add_sets_arg(p)
+    p.add_argument(
+        "--collect",
+        choices=["project", "imported"],
+        default=None,
+        metavar="project|imported",
+        help="Copy found samples into the set's project folder. 'project' re-collects samples that already have "
+        "a collected path (skips others). 'imported' always copies to Samples/Imported. "
+        "Omit to fix references as absolute paths without copying.",
     )
     p.add_argument(
         "--only-missing",
@@ -244,7 +241,7 @@ def parse_arguments() -> argparse.Namespace:
     _add_list_samples_subcommand(subparsers)
     _add_list_plugins_subcommand(subparsers)
     _add_unzip_xml_subcommand(subparsers)
-    _add_samples_subcommand(subparsers)
+    _add_fix_samples_subcommand(subparsers)
     _add_tracks_subcommand(subparsers)
     _add_routing_subcommand(subparsers)
     _add_rename_subcommand(subparsers)
@@ -379,7 +376,7 @@ def run_unzip_xml(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_samples(args: argparse.Namespace) -> int:
+def run_fix_samples(args: argparse.Namespace) -> int:
     logger.info("%sLoading db...", M)
     db = create_db.load_db()
     paths = _get_sets(args.sets)
@@ -397,7 +394,7 @@ def run_samples(args: argparse.Namespace) -> int:
             root_logger.handlers = [buffer_handler]
             try:
                 ableton_set = _load_set(path)
-                missing = ableton_set.fix_samples(db, collect_and_save=args.fix_collect) if ableton_set else -1
+                missing = ableton_set.fix_samples(db, collect=args.collect) if ableton_set else -1
             except ElementNotFound:
                 missing = -1
             root_logger.handlers = original_handlers
@@ -413,7 +410,7 @@ def run_samples(args: argparse.Namespace) -> int:
                 if ableton_set is None:
                     _log_separator()
                     continue
-                missing = ableton_set.fix_samples(db, collect_and_save=args.fix_collect)
+                missing = ableton_set.fix_samples(db, collect=args.collect)
                 if missing > 0:
                     sets_with_missing += 1
                 if args.save:
@@ -519,7 +516,7 @@ _COMMAND_HANDLERS = {
     "list-samples": run_list_samples,
     "list-plugins": run_list_plugins,
     "unzip-xml": run_unzip_xml,
-    "samples": run_samples,
+    "fix-samples": run_fix_samples,
     "tracks": run_tracks,
     "routing": run_routing,
     "rename": run_rename,
