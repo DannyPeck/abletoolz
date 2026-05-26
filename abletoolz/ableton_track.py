@@ -20,12 +20,9 @@ class AbletonTrack(object):
             self.name = get_element(track_root, "Name.EffectiveName", attribute="Value")
         self.id = track_root.get("Id")
         self.group_id = get_element(track_root, "TrackGroupId", attribute="Value")
-        # Guessing 'Sesstion' was a typo early on and got stuck to not break backwards compatibility
-        self.width = get_element(
-            track_root,
-            "DeviceChain.Mixer.ViewStateSesstionTrackWidth",
-            attribute="Value",
-        )
+        # 'Sesstiontrack' was Ableton's typo in Live < 12.4; corrected to 'SessionTrack' in 12.4+
+        width_key = "ViewStateSessionTrackWidth" if version >= (12, 4, 0) else "ViewStateSesstionTrackWidth"
+        self.width = get_element(track_root, f"DeviceChain.Mixer.{width_key}", attribute="Value")
         # Lane height in arrangement view will be automation lane 0
         self.height = get_element(
             track_root,
